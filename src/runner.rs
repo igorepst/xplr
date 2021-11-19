@@ -38,16 +38,9 @@ fn call_lua(
     func: &str,
     _silent: bool,
 ) -> Result<Option<Vec<app::ExternalMsg>>> {
-    let _focus_index = app
-        .directory_buffer
-        .as_ref()
-        .map(|d| d.focus)
-        .unwrap_or_default()
-        .to_string();
-
     let arg = app.to_lua_arg();
     let arg = lua.to_value(&arg)?;
-    lua::call(lua, func, arg)
+    lua::call_with_cache(lua, func, arg)
 }
 
 fn call(app: &app::App, cmd: app::Command, silent: bool) -> Result<ExitStatus> {
@@ -280,6 +273,10 @@ impl Runner {
                                 tx_msg_in.send(task)?;
                             }
 
+                            CacheDirectoryNodes(nodes) => {
+                                lua::cache_directory_nodes(&lua, &nodes)?;
+                            }
+
                             Quit => {
                                 result = Ok(None);
                                 break 'outer;
@@ -460,14 +457,8 @@ impl Runner {
                             CallLuaSilently(func) => {
                                 match call_lua(&app, &lua, &func, false) {
                                     Ok(Some(msgs)) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Ok(None) => {}
                                     Err(err) => {
@@ -493,14 +484,8 @@ impl Runner {
 
                                 match pipe_reader::read_all(&app.pipe.msg_in) {
                                     Ok(msgs) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Err(err) => {
                                         app = app.log_error(err.to_string())?;
@@ -530,14 +515,8 @@ impl Runner {
 
                                 match call_lua(&app, &lua, &func, false) {
                                     Ok(Some(msgs)) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Ok(None) => {}
                                     Err(err) => {
@@ -588,14 +567,8 @@ impl Runner {
 
                                 match res {
                                     Ok(Some(msgs)) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Ok(None) => {}
                                     Err(err) => {
@@ -633,14 +606,8 @@ impl Runner {
 
                                 match res {
                                     Ok(Some(msgs)) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Ok(None) => {}
                                     Err(err) => {
@@ -680,14 +647,8 @@ impl Runner {
                                 // TODO remove duplicate segment
                                 match pipe_reader::read_all(&app.pipe.msg_in) {
                                     Ok(msgs) => {
-                                        for msg in msgs {
-                                            app = app.handle_task(
-                                                app::Task::new(
-                                                    app::MsgIn::External(msg),
-                                                    None,
-                                                ),
-                                            )?;
-                                        }
+                                        app = app
+                                            .handle_batch_external_msgs(msgs)?;
                                     }
                                     Err(err) => {
                                         app = app.log_error(err.to_string())?;

@@ -737,10 +737,14 @@ fn draw_help_menu<B: Backend>(
         .into_iter()
         .map(|l| match l {
             HelpMenuLine::Paragraph(p) => Row::new([Cell::from(p)].to_vec()),
-            HelpMenuLine::KeyMap(k, remaps, h) => Row::new(
-                [Cell::from(k), Cell::from(remaps.join("|")), Cell::from(h)]
-                    .to_vec(),
-            ),
+            HelpMenuLine::KeyMap(k, remaps, h) => Row::new({
+                if app.config.general.hide_remaps_in_help_menu {
+                    [Cell::from(k), Cell::from(h)].to_vec()
+                } else {
+                    [Cell::from(k), Cell::from(remaps.join("|")), Cell::from(h)]
+                        .to_vec()
+                }
+            }),
         })
         .collect::<Vec<Row>>();
 
@@ -749,11 +753,15 @@ fn draw_help_menu<B: Backend>(
             config,
             format!(" Help [{}{}] ", &app.mode.name, read_only_indicator(app)),
         ))
-        .widths(&[
-            TuiConstraint::Percentage(20),
-            TuiConstraint::Percentage(20),
-            TuiConstraint::Percentage(60),
-        ]);
+        .widths(if app.config.general.hide_remaps_in_help_menu {
+            &[TuiConstraint::Percentage(20), TuiConstraint::Percentage(80)]
+        } else {
+            &[
+                TuiConstraint::Percentage(20),
+                TuiConstraint::Percentage(20),
+                TuiConstraint::Percentage(60),
+            ]
+        });
     f.render_widget(help_menu, layout_size);
 }
 
@@ -1034,7 +1042,7 @@ pub fn draw_custom_content<B: Backend>(
             let render = lua
                 .to_value(&ctx)
                 .map(|arg| {
-                    lua::call(lua, &render, arg)
+                    lua::call_with_cache(lua, &render, arg)
                         .unwrap_or_else(|e| format!("{:?}", e))
                 })
                 .unwrap_or_else(|e| e.to_string());
@@ -1076,7 +1084,7 @@ pub fn draw_custom_content<B: Backend>(
             let items = lua
                 .to_value(&ctx)
                 .map(|arg| {
-                    lua::call(lua, &render, arg)
+                    lua::call_with_cache(lua, &render, arg)
                         .unwrap_or_else(|e| vec![format!("{:?}", e)])
                 })
                 .unwrap_or_else(|e| vec![e.to_string()])
@@ -1146,7 +1154,7 @@ pub fn draw_custom_content<B: Backend>(
             let rows = lua
                 .to_value(&ctx)
                 .map(|arg| {
-                    lua::call(lua, &render, arg)
+                    lua::call_with_cache(lua, &render, arg)
                         .unwrap_or_else(|e| vec![vec![format!("{:?}", e)]])
                 })
                 .unwrap_or_else(|e| vec![vec![e.to_string()]])
@@ -1203,7 +1211,7 @@ impl From<TuiRect> for Rect {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ContentRendererArg {
     app: app::CallLuaArg,
     screen_size: Rect,

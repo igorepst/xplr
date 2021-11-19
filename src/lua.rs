@@ -1,3 +1,4 @@
+use crate::app::Node;
 use crate::app::VERSION;
 use crate::config::Config;
 use anyhow::bail;
@@ -8,6 +9,7 @@ use serde::Deserialize;
 use std::fs;
 
 const DEFAULT_LUA_SCRIPT: &str = include_str!("init.lua");
+const CACHE_LUA_SCRIPT: &str = include_str!("__cache__.lua");
 const UPGRADE_GUIDE_LINK: &str = "https://xplr.dev/en/upgrade-guide.html";
 
 fn parse_version(version: &str) -> Result<(u16, u16, u16, Option<u16>)> {
@@ -49,30 +51,6 @@ pub fn check_version(version: &str, path: &str) -> Result<()> {
     }
 }
 
-fn resolve_fn_recursive<'lua, 'a>(
-    table: &mlua::Table<'lua>,
-    mut path: impl Iterator<Item = &'a str>,
-) -> Result<mlua::Function<'lua>> {
-    if let Some(nxt) = path.next() {
-        match table.get(nxt)? {
-            mlua::Value::Table(t) => resolve_fn_recursive(&t, path),
-            mlua::Value::Function(f) => Ok(f),
-            t => bail!("{:?} is not a function", t),
-        }
-    } else {
-        bail!("Invalid path")
-    }
-}
-
-/// This function resolves paths like `builtin.func_foo`, `custom.func_bar` into lua functions.
-pub fn resolve_fn<'lua>(
-    globals: &mlua::Table<'lua>,
-    path: &str,
-) -> Result<mlua::Function<'lua>> {
-    let path = format!("xplr.fn.{}", path);
-    resolve_fn_recursive(globals, path.split('.'))
-}
-
 /// Used to initialize Lua globals
 pub fn init(lua: &Lua) -> Result<Config> {
     let config = Config::default();
@@ -91,6 +69,7 @@ pub fn init(lua: &Lua) -> Result<Config> {
     globals.set("xplr", lua_xplr)?;
 
     lua.load(DEFAULT_LUA_SCRIPT).set_name("init")?.exec()?;
+    lua.load(CACHE_LUA_SCRIPT).set_name("internal")?.exec()?;
 
     let lua_xplr: mlua::Table = globals.get("xplr")?;
     let config: Config = lua.from_value(lua_xplr.get("config")?)?;
@@ -119,16 +98,62 @@ pub fn extend(lua: &Lua, path: &str) -> Result<Config> {
     Ok(config)
 }
 
-/// Used to call lua functions.
+fn resolve_fn_recursive<'lua, 'a>(
+    table: &mlua::Table<'lua>,
+    mut path: impl Iterator<Item = &'a str>,
+) -> Result<mlua::Function<'lua>> {
+    if let Some(nxt) = path.next() {
+        match table.get(nxt)? {
+            mlua::Value::Table(t) => resolve_fn_recursive(&t, path),
+            mlua::Value::Function(f) => Ok(f),
+            t => bail!("{:?} is not a function", t),
+        }
+    } else {
+        bail!("Invalid path")
+    }
+}
+
+/// This function resolves paths like `builtin.func_foo`, `custom.func_bar` into lua functions.
+pub fn resolve_fn<'lua>(
+    globals: &mlua::Table<'lua>,
+    path: &str,
+) -> Result<mlua::Function<'lua>> {
+    resolve_fn_recursive(globals, path.split('.'))
+}
+
 pub fn call<'lua, R: Deserialize<'lua>>(
     lua: &'lua Lua,
     func: &str,
-    args: mlua::Value<'lua>,
+    arg: mlua::Value<'lua>,
 ) -> Result<R> {
-    let func = resolve_fn(&lua.globals(), func)?;
-    let res: mlua::Value = func.call(args)?;
+    let func = format!("xplr.fn.{}", func);
+    let func = resolve_fn(&lua.globals(), &func)?;
+    let res: mlua::Value = func.call(arg)?;
     let res: R = lua.from_value(res)?;
     Ok(res)
+}
+
+/// Used to call lua functions with cache support.
+pub fn call_with_cache<'lua, R: Deserialize<'lua>>(
+    lua: &'lua Lua,
+    func: &str,
+    arg: mlua::Value<'lua>,
+) -> Result<R> {
+    let caller: mlua::Function =
+        resolve_fn(&lua.globals(), "xplr.__CACHE__.call")?;
+    let func = format!("xplr.fn.{}", func);
+    let func: mlua::Function = resolve_fn(&lua.globals(), &func)?;
+    let res: mlua::Value = caller.call((func, arg))?;
+    let res: R = lua.from_value(res)?;
+    Ok(res)
+}
+
+/// Used to cache the directory nodes.
+pub fn cache_directory_nodes(lua: &Lua, nodes: &[Node]) -> Result<()> {
+    let func = "xplr.__CACHE__.set_directory_nodes";
+    let func: mlua::Function = resolve_fn(&lua.globals(), func)?;
+    func.call(lua.to_value(nodes)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -141,24 +166,24 @@ mod tests {
         assert!(check_version(VERSION, "foo path").is_ok());
 
         // Current release if OK
-        assert!(check_version("0.16.3", "foo path").is_ok());
+        assert!(check_version("0.16.4", "foo path").is_ok());
 
         // Prev major release is ERR
         // - Not yet
 
         // Prev minor release is ERR (Change when we get to v1)
-        assert!(check_version("0.15.3", "foo path").is_err());
+        assert!(check_version("0.15.4", "foo path").is_err());
 
         // Prev bugfix release is OK
-        assert!(check_version("0.16.2", "foo path").is_ok());
+        assert!(check_version("0.16.3", "foo path").is_ok());
 
         // Next major release is ERR
-        assert!(check_version("1.16.3", "foo path").is_err());
+        assert!(check_version("1.16.4", "foo path").is_err());
 
         // Next minor release is ERR
-        assert!(check_version("0.17.3", "foo path").is_err());
+        assert!(check_version("0.17.4", "foo path").is_err());
 
         // Next bugfix release is ERR (Change when we get to v1)
-        assert!(check_version("0.16.4", "foo path").is_err());
+        assert!(check_version("0.16.5", "foo path").is_err());
     }
 }

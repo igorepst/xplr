@@ -29,6 +29,12 @@ Type: boolean
 Set it to `true` if you want to enable a safety feature that will save you from
 yourself when you type recklessly.
 
+## hide_remaps_in_help_menu
+
+Type: boolean
+
+Set it to `true` if you want to hide all remaps in the help menu.
+
 ## initial_layout
 
 Type: string
